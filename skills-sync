@@ -1,0 +1,212 @@
+#!/usr/bin/env sh
+set -eu
+
+SELF=$(readlink -f "$0")
+REPO=$(dirname "$SELF")
+SRC_ROOT="$REPO/skills"
+DEST=${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}
+DRY=0
+YES=0
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [FLAGS] COMMAND [NAME...]
+
+Syncs Claude Code user skills between this repository and $DEST.
+
+Commands:
+  list             show every skill on both sides with its status
+  status [NAME..]  show which files differ, in both directions
+  diff NAME        full diff between the repository copy and the local one
+  push [NAME..]    local -> repository (no NAME: every local skill)
+  pull [NAME..]    repository -> local (no NAME: every stored skill)
+  index            print a markdown table built from the SKILL.md frontmatter
+
+Flags:
+  -n, --dry-run    show what would change and stop
+  -y, --yes        do not ask before overwriting or deleting files
+      --dest DIR   use DIR instead of $DEST
+  -h, --help       show this help
+
+A skill missing from the source is never removed from the target; deletions
+happen only inside a skill directory that is being synced.
+EOF
+}
+
+die() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+frontmatter() {
+    awk -v key="$2" '
+        NR == 1 && $0 == "---" { inside = 1; next }
+        inside && $0 == "---" { exit }
+        inside {
+            idx = index($0, ":")
+            if (idx == 0) next
+            k = substr($0, 1, idx - 1)
+            v = substr($0, idx + 1)
+            gsub(/^[ \t]+|[ \t]+$/, "", k)
+            gsub(/^[ \t]+|[ \t]+$/, "", v)
+            gsub(/^["'\'']|["'\'']$/, "", v)
+            if (k == key) { print v; exit }
+        }
+    ' "$1"
+}
+
+validate() {
+    dir=$1
+    name=$2
+    [ -f "$dir/SKILL.md" ] || die "$name: no SKILL.md in $dir"
+    got=$(frontmatter "$dir/SKILL.md" name)
+    [ -n "$got" ] || die "$name: SKILL.md has no 'name' in the frontmatter"
+    [ "$got" = "$name" ] || die "$name: frontmatter name is '$got', expected '$name'"
+    desc=$(frontmatter "$dir/SKILL.md" description)
+    [ -n "$desc" ] || die "$name: SKILL.md has no 'description' in the frontmatter"
+}
+
+list_skills() {
+    root=$1
+    [ -d "$root" ] || return 0
+    for path in "$root"/*/; do
+        [ -d "$path" ] || continue
+        base=${path%/}
+        printf '%s\n' "${base##*/}"
+    done
+}
+
+changes() {
+    rsync -an --delete --out-format='%i %n' "$1/" "$2/" | awk '$2 != "./"'
+}
+
+destructive() {
+    printf '%s\n' "$1" | grep -Eq '^\*deleting|^[<>]f[^+]'
+}
+
+sync_one() {
+    src=$1
+    dst=$2
+    name=$3
+    [ -d "$src" ] || die "$name: not found in $(dirname "$src")"
+    validate "$src" "$name"
+    ch=$(changes "$src" "$dst")
+    if [ -z "$ch" ]; then
+        echo "$name: up to date"
+        return 0
+    fi
+    echo "$name:"
+    printf '%s\n' "$ch" | sed 's/^/  /'
+    [ "$DRY" -eq 0 ] || return 0
+    if destructive "$ch" && [ "$YES" -eq 0 ]; then
+        [ -t 0 ] || die "$name: overwrites or deletions pending, rerun with -y"
+        printf 'Apply to %s? [y/N] ' "$dst"
+        read -r answer
+        case "$answer" in
+            y|Y|yes|YES) ;;
+            *) echo "$name: skipped"; return 0 ;;
+        esac
+    fi
+    mkdir -p "$dst"
+    rsync -a --delete "$src/" "$dst/"
+    echo "$name: done"
+}
+
+cmd_list() {
+    printf '%s\n%s\n' "$(list_skills "$SRC_ROOT")" "$(list_skills "$DEST")" \
+        | sed '/^$/d' | sort -u | while read -r name; do
+        if [ ! -d "$SRC_ROOT/$name" ]; then
+            status=local-only
+        elif [ ! -d "$DEST/$name" ]; then
+            status=repo-only
+        elif [ -z "$(changes "$SRC_ROOT/$name" "$DEST/$name")" ]; then
+            status=synced
+        else
+            status=differs
+        fi
+        printf '%-24s %s\n' "$name" "$status"
+    done
+}
+
+cmd_status() {
+    for name in "$@"; do
+        echo "$name:"
+        if [ -d "$SRC_ROOT/$name" ] && [ -d "$DEST/$name" ]; then
+            out=$(changes "$DEST/$name" "$SRC_ROOT/$name")
+            if [ -z "$out" ]; then
+                echo "  in sync"
+            else
+                echo "  push (local -> repo):"
+                printf '%s\n' "$out" | sed 's/^/    /'
+                echo "  pull (repo -> local):"
+                changes "$SRC_ROOT/$name" "$DEST/$name" | sed 's/^/    /'
+            fi
+        elif [ -d "$SRC_ROOT/$name" ]; then
+            echo "  repo-only, run: $(basename "$0") pull $name"
+        elif [ -d "$DEST/$name" ]; then
+            echo "  local-only, run: $(basename "$0") push $name"
+        else
+            die "$name: not found in $SRC_ROOT nor $DEST"
+        fi
+    done
+}
+
+cmd_index() {
+    echo '| Skill | Description |'
+    echo '| --- | --- |'
+    list_skills "$SRC_ROOT" | while read -r name; do
+        file="$SRC_ROOT/$name/SKILL.md"
+        [ -f "$file" ] || continue
+        desc=$(frontmatter "$file" description | sed 's/|/\\|/g')
+        printf '| %s | %s |\n' "$name" "$desc"
+    done
+}
+
+COMMAND=""
+NAMES=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -n|--dry-run) DRY=1; shift ;;
+        -y|--yes) YES=1; shift ;;
+        --dest) [ $# -ge 2 ] || die "--dest needs a directory"; DEST=$2; shift 2 ;;
+        -*) echo "Unknown flag: $1" >&2; usage >&2; exit 1 ;;
+        *)
+            if [ -z "$COMMAND" ]; then
+                COMMAND=$1
+            else
+                NAMES="$NAMES $1"
+            fi
+            shift ;;
+    esac
+done
+
+[ -n "$COMMAND" ] || { usage >&2; exit 1; }
+command -v rsync >/dev/null 2>&1 || die "rsync is required but not installed"
+
+set -- $NAMES
+
+case "$COMMAND" in
+    list) cmd_list ;;
+    index) cmd_index ;;
+    status)
+        [ $# -gt 0 ] || set -- $(printf '%s\n%s\n' "$(list_skills "$SRC_ROOT")" "$(list_skills "$DEST")" | sed '/^$/d' | sort -u)
+        [ $# -gt 0 ] || die "no skills found"
+        cmd_status "$@" ;;
+    diff)
+        [ $# -eq 1 ] || die "diff takes exactly one skill name"
+        diff -ruN "$SRC_ROOT/$1" "$DEST/$1" || true ;;
+    push)
+        [ $# -gt 0 ] || set -- $(list_skills "$DEST")
+        [ $# -gt 0 ] || die "nothing to push: $DEST is empty"
+        for name in "$@"; do
+            sync_one "$DEST/$name" "$SRC_ROOT/$name" "$name"
+        done ;;
+    pull)
+        [ $# -gt 0 ] || set -- $(list_skills "$SRC_ROOT")
+        [ $# -gt 0 ] || die "nothing to pull: $SRC_ROOT is empty"
+        for name in "$@"; do
+            sync_one "$SRC_ROOT/$name" "$DEST/$name" "$name"
+        done ;;
+    *) echo "Unknown command: $COMMAND" >&2; usage >&2; exit 1 ;;
+esac
