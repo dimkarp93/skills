@@ -72,7 +72,9 @@ list_skills() {
     for path in "$root"/*/; do
         [ -d "$path" ] || continue
         base=${path%/}
-        printf '%s\n' "${base##*/}"
+        name=${base##*/}
+        [ "$name" != "synced" ] || continue
+        printf '%s\n' "$name"
     done
 }
 

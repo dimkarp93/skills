@@ -1,6 +1,6 @@
 ---
 name: go-build
-description: Собрать Go-программу по конвенциям репозитория dimkarp93/install (~/tools/install/CONVENTIONS.md) — версия из versions.txt, origin/upstream/commit/channel через ldflags, бинарь с именем репозитория в корне, рецепты build/test/bump-* в Justfile. Используй, когда просят собрать Go-тулзу, подготовить её к установке через local_install.sh / github_install.sh / gitea_install.sh, завести Justfile или релизный workflow, добавить --version / --origin / --buildinfo, поднять версию (bump) или обновить Go до последнего стабильного релиза.
+description: Собрать Go-программу по конвенциям репозитория dimkarp93/install (~/tools/install/CONVENTIONS.md) — версия из versions.txt, origin/upstream/commit/channel через ldflags, бинарь с именем репозитория в корне, рецепты build/test/bump-*/release в justfile. Используй, когда просят завести новую тулзу по конвенциям (init_install.sh), собрать Go-тулзу, подготовить её к установке через local_install.sh / github_install.sh / gitea_install.sh, завести Justfile или релизный workflow, добавить --version / --origin / --buildinfo, поднять версию (bump) или обновить Go до последнего стабильного релиза.
 ---
 
 # Сборка Go-программы по CONVENTIONS.md
@@ -32,45 +32,55 @@ description: Собрать Go-программу по конвенциям ре
 После обновления Go приведи `go.mod` в порядок: директива `go` не должна быть выше
 установленного тулчейна; если поднимаешь её — спроси.
 
-## Шаг 2. Как собирать: just, не make
+## Шаг 2. Новый репозиторий — `init_install.sh`, а не шаблоны руками
 
-По умолчанию — `just` и `Justfile` (строчный `justfile` тоже годится, следуй тому, что уже есть
+Если репозитория ещё нет (или в нём нет `versions.txt`, `justfile`, workflow), не собирай скелет
+вручную — зови скаффолдер из `~/tools/install`:
+
+```sh
+~/tools/install/init_install.sh --lang go --owner <owner> [--ci both] [--layout root] <name|path>
+```
+
+Он создаёт `versions.txt`, `justfile` (`build`, `check`, `bump-*`, `release`, `install`),
+`.gitignore`, `cmd/<name>/main.go` с подключённым `github.com/dimkarp93/install-libs/buildinfo`,
+`go.mod` с сетевым путём модуля, workflow релиза, делает `git init` и первый коммит, а в конце сам
+прогоняет `check_install.sh`. Существующие файлы он не перезаписывает, так что поверх
+наполовину готового репозитория запускай с `--force`.
+
+Для shell-тулзы — `--lang sh` (скелет `<name>.sh` с подстановкой version/origin при сборке).
+
+Существующий репозиторий, где чего-то не хватает, чинится не руками:
+
+```sh
+~/tools/install/check_install.sh --fix <path>
+```
+
+`--fix` дописывает `versions.txt`, `.gitignore`, рецепты `bump-*` и workflow релиза. `Makefile` он
+не правит — там цели добавляй сам.
+
+## Шаг 3. Чем собирать: just, не make
+
+По умолчанию — `just` и `justfile` (заглавный `Justfile` тоже годится, следуй тому, что уже есть
 в репозитории).
 
 `make` используй **только** если:
 - в репозитории уже есть `Makefile` и нет `Justfile`, либо
 - пользователь явно попросил make.
 
-Если в репозитории нет ни того, ни другого — заводи `justfile` из
-`~/.claude/skills/go-build/templates/justfile` (замени `bin := "NAME"` на имя репозитория,
-поправь путь к `package main`: `./cmd/<name>` или `.`).
-
 Если `just` не установлен, скажи об этом и предложи поставить (`cargo install just`,
 `apt install just`, `go install github.com/casey/just@latest` — по обстоятельствам),
 а не молча переходи на make.
 
-## Шаг 3. Чек-лист соответствия конвенциям
+Проверить соответствие конвенциям целиком:
 
-Перед сборкой проверь и при необходимости заведи:
+```sh
+~/tools/install/check_install.sh --build <path>
+```
 
-- `versions.txt` в корне — semver без `v` (`0.4.0`).
-- Имя бинаря = имя каталога/репозитория; после `just build` он лежит **в корне** репозитория.
-- `package main` в `cmd/<name>/` (нужно для `go install`), либо в корне — как fallback.
-- В `go.mod` путь модуля — сетевой адрес (`github.com/<owner>/<name>`), для major ≥ 2 с суффиксом
-  `/v2`.
-- `upstream.txt` — опционален, нужен только зеркалам.
-- Флаги `--version`, `--origin`, `--buildinfo` реализованы. Проще всего подключить
-  `github.com/dimkarp93/install-libs/buildinfo` — шаблон
-  `~/.claude/skills/go-build/templates/buildinfo.go.txt`. Формат вывода:
-  `--version` → голый semver; `--origin` → канонический URL; `--buildinfo` → строки
-  `origin/upstream/version/commit/channel` в этом порядке.
-- Сборка статическая: `CGO_ENABLED=0`, `-trimpath`,
-  `-ldflags="-s -w -X main.version=... -X main.origin=... -X main.upstream=... -X main.commit=... -X main.channel=local"`.
-- Origin нормализован: `https`, без userinfo, без `.git`, без хвостового `/`.
-  Готовый case-блок уже в шаблоне justfile — не переписывай его руками.
-- Рецепты `bump-patch` / `bump-minor` / `bump-major` есть и правят только `versions.txt`.
-- Релизные workflow, если нужны релизы: `~/tools/install/workflows/release.yml` →
-  `.github/workflows/release.yml`, `release-gitea.yml` → `.gitea/workflows/release.yml`.
+Он покрывает весь чек-лист: `versions.txt`, имя бинаря, цель сборки и рецепты `bump-*`, workflow
+релиза с `SHA256SUMS`, формат тегов, `.gitignore`, подстановку origin, требования `go install`
+(сетевой путь модуля, `cmd/<name>`, отсутствие `replace`, суффикс `/vN`) и вывод
+`--version` / `--origin` / `--buildinfo`. Не пересказывай чек-лист по памяти — запусти скрипт.
 
 ## Шаг 4. Сборка и проверка
 
@@ -85,11 +95,13 @@ just build
 - `origin` в `--buildinfo` — канонический https-URL или `local`, **без токена и без userinfo**;
 - `channel=local` для локальной сборки.
 
-Затем `just check` (vet + test), если такой рецепт есть.
+Затем `just check` (vet + test) и `just check-conventions`, если такие рецепты есть.
 
 ## Что не делать
 
 - Не коммить и не пушить без просьбы; `bump-*` — только по явному запросу.
 - Не вшивать `git remote get-url origin` в бинарь без нормализации: в remote бывает токен.
+- Не копировать шаблоны `justfile` и workflow руками: единственный их источник —
+  `init_install.sh` (`--emit` печатает любой шаблон).
 - Не менять формат вывода флагов «для красоты» — это контракт с инсталляторами.
 - Не добавлять комментарии в justfile, скрипты и Go-код.

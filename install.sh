@@ -1,11 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
+TOOLS="skills-sync config-sync"
+
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [FLAGS]
 
-Links skills-sync from this repository into a directory on your PATH.
+Links $TOOLS from this repository into a directory on your PATH.
 
   --bin DIR    install into DIR (default: ~/.local/bin)
   -f, --force  replace an existing file without asking
@@ -26,31 +28,36 @@ while [ $# -gt 0 ]; do
 done
 
 REPO=$(dirname "$(readlink -f "$0")")
-SRC="$REPO/skills-sync"
-TARGET="$BIN/skills-sync"
 
-[ -x "$SRC" ] || { echo "Error: $SRC is missing or not executable" >&2; exit 1; }
+for tool in $TOOLS; do
+    [ -x "$REPO/$tool" ] || { echo "Error: $REPO/$tool is missing or not executable" >&2; exit 1; }
+done
 
 mkdir -p "$BIN"
 
-if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
-    if [ "$(readlink -f "$TARGET" 2>/dev/null || true)" = "$SRC" ]; then
-        echo "Already installed: $TARGET"
-        exit 0
-    fi
-    if [ "$FORCE" -eq 0 ]; then
-        [ -t 0 ] || { echo "Error: $TARGET exists, rerun with --force" >&2; exit 1; }
-        printf 'Replace %s? [y/N] ' "$TARGET"
-        read -r answer
-        case "$answer" in
-            y|Y|yes|YES) ;;
-            *) echo "Aborted"; exit 1 ;;
-        esac
-    fi
-fi
+for tool in $TOOLS; do
+    SRC="$REPO/$tool"
+    TARGET="$BIN/$tool"
 
-ln -sfn "$SRC" "$TARGET"
-echo "Installed: $TARGET -> $SRC"
+    if [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+        if [ "$(readlink -f "$TARGET" 2>/dev/null || true)" = "$SRC" ]; then
+            echo "Already installed: $TARGET"
+            continue
+        fi
+        if [ "$FORCE" -eq 0 ]; then
+            [ -t 0 ] || { echo "Error: $TARGET exists, rerun with --force" >&2; exit 1; }
+            printf 'Replace %s? [y/N] ' "$TARGET"
+            read -r answer
+            case "$answer" in
+                y|Y|yes|YES) ;;
+                *) echo "Skipped: $TARGET"; continue ;;
+            esac
+        fi
+    fi
+
+    ln -sfn "$SRC" "$TARGET"
+    echo "Installed: $TARGET -> $SRC"
+done
 
 case ":$PATH:" in
     *":$BIN:"*) ;;

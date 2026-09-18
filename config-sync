@@ -1,0 +1,204 @@
+#!/usr/bin/env sh
+set -eu
+
+SELF=$(readlink -f "$0")
+REPO=$(dirname "$SELF")
+SRC_ROOT="$REPO/config"
+DEST=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+DRY=0
+YES=0
+
+TARGETS="claude-md settings"
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [FLAGS] COMMAND [TARGET...]
+
+Syncs the global Claude Code configuration between this repository and $DEST.
+
+Targets:
+  claude-md        CLAUDE.md
+  settings         settings.json
+
+Commands:
+  list             show every target with its status
+  status [TARGET]  show what would change, in both directions
+  diff [TARGET]    full diff between the repository copy and the local one
+  push [TARGET]    local -> repository (no TARGET: every target)
+  pull [TARGET]    repository -> local (no TARGET: every target)
+
+Flags:
+  -n, --dry-run    show what would change and stop
+  -y, --yes        do not ask before overwriting
+      --dest DIR   use DIR instead of $DEST
+  -h, --help       show this help
+
+settings.local.json is machine-local and is never synced.
+EOF
+}
+
+die() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+target_file() {
+    case "$1" in
+        claude-md) echo "CLAUDE.md" ;;
+        settings) echo "settings.json" ;;
+        *) die "unknown target: $1 (known: $TARGETS)" ;;
+    esac
+}
+
+validate() {
+    file=$1
+    name=$2
+    [ -s "$file" ] || die "$name: $file is empty"
+    if [ "$name" = "settings" ] && command -v python3 >/dev/null 2>&1; then
+        python3 -m json.tool "$file" >/dev/null 2>&1 || die "$name: $file is not valid JSON"
+    fi
+}
+
+show_diff() {
+    diff -u "$1" "$2" || true
+}
+
+sync_one() {
+    name=$1
+    src=$2
+    dst=$3
+    [ -f "$src" ] || die "$name: not found at $src"
+    validate "$src" "$name"
+    if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+        echo "$name: up to date"
+        return 0
+    fi
+    echo "$name:"
+    if [ -f "$dst" ]; then
+        show_diff "$dst" "$src" | sed 's/^/  /'
+    else
+        echo "  new file: $dst"
+    fi
+    [ "$DRY" -eq 0 ] || return 0
+    if [ -f "$dst" ] && [ "$YES" -eq 0 ]; then
+        [ -t 0 ] || die "$name: $dst would be overwritten, rerun with -y"
+        printf 'Overwrite %s? [y/N] ' "$dst"
+        read -r answer
+        case "$answer" in
+            y|Y|yes|YES) ;;
+            *) echo "$name: skipped"; return 0 ;;
+        esac
+    fi
+    mkdir -p "$(dirname "$dst")"
+    cp -p "$src" "$dst"
+    echo "$name: done"
+}
+
+cmd_list() {
+    for name in $TARGETS; do
+        file=$(target_file "$name")
+        repo="$SRC_ROOT/$file"
+        local="$DEST/$file"
+        if [ -f "$repo" ] && [ -f "$local" ]; then
+            if cmp -s "$repo" "$local"; then
+                status=synced
+            else
+                status=differs
+            fi
+        elif [ -f "$repo" ]; then
+            status=repo-only
+        elif [ -f "$local" ]; then
+            status=local-only
+        else
+            status=missing
+        fi
+        printf '%-12s %-16s %s\n' "$name" "$file" "$status"
+    done
+}
+
+cmd_status() {
+    for name in "$@"; do
+        file=$(target_file "$name")
+        repo="$SRC_ROOT/$file"
+        local="$DEST/$file"
+        echo "$name:"
+        if [ -f "$repo" ] && [ -f "$local" ]; then
+            if cmp -s "$repo" "$local"; then
+                echo "  in sync"
+            else
+                echo "  push (local -> repo) would change $repo"
+                echo "  pull (repo -> local) would change $local"
+            fi
+        elif [ -f "$repo" ]; then
+            echo "  repo-only, run: $(basename "$0") pull $name"
+        elif [ -f "$local" ]; then
+            echo "  local-only, run: $(basename "$0") push $name"
+        else
+            echo "  missing on both sides"
+        fi
+    done
+}
+
+cmd_diff() {
+    for name in "$@"; do
+        file=$(target_file "$name")
+        repo="$SRC_ROOT/$file"
+        local="$DEST/$file"
+        echo "$name:"
+        if [ -f "$repo" ] && [ -f "$local" ]; then
+            show_diff "$repo" "$local"
+        elif [ -f "$repo" ]; then
+            echo "  repo-only: $repo"
+        elif [ -f "$local" ]; then
+            echo "  local-only: $local"
+        else
+            echo "  missing on both sides"
+        fi
+    done
+}
+
+COMMAND=""
+NAMES=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -n|--dry-run) DRY=1; shift ;;
+        -y|--yes) YES=1; shift ;;
+        --dest) [ $# -ge 2 ] || die "--dest needs a directory"; DEST=$2; shift 2 ;;
+        -*) echo "Unknown flag: $1" >&2; usage >&2; exit 1 ;;
+        *)
+            if [ -z "$COMMAND" ]; then
+                COMMAND=$1
+            else
+                NAMES="$NAMES $1"
+            fi
+            shift ;;
+    esac
+done
+
+[ -n "$COMMAND" ] || { usage >&2; exit 1; }
+
+set -- $NAMES
+
+case "$COMMAND" in
+    list) cmd_list ;;
+    status)
+        [ $# -gt 0 ] || set -- $TARGETS
+        cmd_status "$@" ;;
+    diff)
+        [ $# -gt 0 ] || set -- $TARGETS
+        cmd_diff "$@" ;;
+    push)
+        [ $# -gt 0 ] || set -- $TARGETS
+        for name in "$@"; do
+            file=$(target_file "$name")
+            sync_one "$name" "$DEST/$file" "$SRC_ROOT/$file"
+        done ;;
+    pull)
+        [ $# -gt 0 ] || set -- $TARGETS
+        for name in "$@"; do
+            file=$(target_file "$name")
+            sync_one "$name" "$SRC_ROOT/$file" "$DEST/$file"
+        done ;;
+    *) echo "Unknown command: $COMMAND" >&2; usage >&2; exit 1 ;;
+esac

@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git blame *)"
+    ]
+  },
+  "model": "opus",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Project rule: never add comments to code (any language) unless the user explicitly asked for comments on this specific function/feature earlier in the conversation. Does this tool call avoid adding any new comment lines (//, #, /* */, --, \"\"\", <!-- -->, etc.) that were not explicitly requested? Ignore shebang lines, license/copyright headers, and required tooling directives (e.g. # noqa, //go:build, eslint-disable) — those are not violations. Answer yes if no unrequested comments were added. Answer no if unrequested comments were added, and list the exact new lines so they can be removed.\n\nTool call:\n$ARGUMENTS",
+            "model": "claude-haiku-4-5-20251001",
+            "continueOnBlock": true
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash /home/dima/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
+  },
+  "language": "Russian",
+  "effortLevel": "medium",
+  "tui": "default",
+  "voice": {
+    "enabled": false,
+    "mode": "hold"
+  },
+  "voiceEnabled": false
+}
