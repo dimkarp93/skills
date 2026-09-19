@@ -58,20 +58,41 @@ skills-sync index                # таблица для этого README
 | --- | --- |
 | `config/CLAUDE.md` | глобальный системный промпт, `~/.claude/CLAUDE.md` |
 | `config/settings.json` | настройки и хуки, `~/.claude/settings.json` |
+| `config/scripts/` | скрипты, на которые ссылаются команды из `settings.json` |
 
 `~/.claude/settings.local.json` — помашинный файл, он намеренно не синхронизируется.
 
 ```sh
-config-sync list                 # обе цели и их статус
+config-sync list                 # все цели и их статус
 config-sync status               # что и в какую сторону разошлось
 config-sync diff claude-md       # полный diff
+config-sync scripts              # какие скрипты найдены в settings.json
 config-sync push                 # ~/.claude -> репозиторий
 config-sync pull settings        # репозиторий -> ~/.claude, только settings.json
 ```
 
-Цели: `claude-md` и `settings`; без имени цели команда работает с обеими. Флаги те же, что у
-`skills-sync`: `-n`, `-y`, `--dest DIR`. Перед перезаписью скрипт печатает diff и спрашивает
+Цели: `claude-md`, `settings` и `scripts`; без имени цели команда работает со всеми. Флаги те же,
+что у `skills-sync`: `-n`, `-y`, `--dest DIR`. Перед перезаписью скрипт печатает diff и спрашивает
 подтверждение, а `settings.json` дополнительно проверяется на валидность JSON.
+
+### Скрипты из settings.json
+
+Цель `scripts` ничего не настраивает вручную: `config-sync` читает `settings.json`, берёт из
+команд (`statusLine`, хуки и прочее) все пути, ведущие внутрь `~/.claude`, и хранит эти файлы в
+`config/scripts/` с тем же относительным путём и правом на исполнение. Добавил новый хук со
+скриптом — достаточно `config-sync push`, отдельный список вести не нужно.
+
+```
+~/.claude/statusline-command.sh            <-> config/scripts/statusline-command.sh
+~/.claude/hooks/block-claude-attribution.sh <-> config/scripts/hooks/block-claude-attribution.sh
+```
+
+Путь, на который ссылается `settings.json`, но которого нет ни в репозитории, ни на машине,
+`config-sync status` показывает отдельной строкой — так видно битые ссылки в конфиге.
+
+При `pull` цели идут в порядке `claude-md`, `settings`, `scripts`: сначала приезжает
+`settings.json`, и уже по нему определяется список скриптов. Пути в `settings.json` абсолютные,
+поэтому на чужой машине они разбираются по части после `/.claude/`.
 
 ## Скиллы
 

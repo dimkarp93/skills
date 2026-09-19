@@ -4,11 +4,12 @@ set -eu
 SELF=$(readlink -f "$0")
 REPO=$(dirname "$SELF")
 SRC_ROOT="$REPO/config"
+SCRIPTS_ROOT="$SRC_ROOT/scripts"
 DEST=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 DRY=0
 YES=0
 
-TARGETS="claude-md settings"
+TARGETS="claude-md settings scripts"
 
 usage() {
     cat <<EOF
@@ -19,6 +20,7 @@ Syncs the global Claude Code configuration between this repository and $DEST.
 Targets:
   claude-md        CLAUDE.md
   settings         settings.json
+  scripts          the files settings.json points its commands at
 
 Commands:
   list             show every target with its status
@@ -26,12 +28,17 @@ Commands:
   diff [TARGET]    full diff between the repository copy and the local one
   push [TARGET]    local -> repository (no TARGET: every target)
   pull [TARGET]    repository -> local (no TARGET: every target)
+  scripts          print the script paths discovered in settings.json
 
 Flags:
   -n, --dry-run    show what would change and stop
   -y, --yes        do not ask before overwriting
       --dest DIR   use DIR instead of $DEST
   -h, --help       show this help
+
+The scripts target is discovered, not configured: every path inside $DEST that
+any command in settings.json refers to is stored under config/scripts with the
+same relative path, keeping its executable bit.
 
 settings.local.json is machine-local and is never synced.
 EOF
@@ -50,12 +57,116 @@ target_file() {
     esac
 }
 
+known_target() {
+    for t in $TARGETS; do
+        [ "$t" != "$1" ] || return 0
+    done
+    die "unknown target: $1 (known: $TARGETS)"
+}
+
 validate() {
     file=$1
     name=$2
     [ -s "$file" ] || die "$name: $file is empty"
     if [ "$name" = "settings" ] && command -v python3 >/dev/null 2>&1; then
         python3 -m json.tool "$file" >/dev/null 2>&1 || die "$name: $file is not valid JSON"
+    fi
+}
+
+discover_scripts() {
+    [ -f "$1" ] || return 0
+    command -v python3 >/dev/null 2>&1 || die "scripts: python3 is required to read $1"
+    python3 - "$1" "$2" <<'PY'
+import json
+import os
+import shlex
+import sys
+
+settings, dest = sys.argv[1], sys.argv[2]
+dest = os.path.realpath(os.path.expanduser(dest))
+skip = {"CLAUDE.md", "settings.json", "settings.local.json"}
+
+try:
+    with open(settings, encoding="utf-8") as fh:
+        data = json.load(fh)
+except (OSError, ValueError):
+    sys.exit(0)
+
+strings = []
+
+
+def walk(node):
+    if isinstance(node, dict):
+        for value in node.values():
+            walk(value)
+    elif isinstance(node, list):
+        for value in node:
+            walk(value)
+    elif isinstance(node, str):
+        strings.append(node)
+
+
+walk(data)
+
+home = os.path.expanduser("~")
+found = set()
+
+for text in strings:
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        tokens = text.split()
+    for token in tokens:
+        for name, value in (("CLAUDE_CONFIG_DIR", dest), ("HOME", home)):
+            token = token.replace("${%s}" % name, value).replace("$" + name, value)
+        token = os.path.expanduser(token)
+        if not token.startswith("/"):
+            continue
+        path = os.path.realpath(token)
+        if path.startswith(dest + os.sep):
+            rel = os.path.relpath(path, dest)
+        elif "/.claude/" in token:
+            rel = token.split("/.claude/", 1)[1]
+        else:
+            continue
+        rel = rel.strip("/")
+        if not rel or rel.startswith("..") or rel in skip:
+            continue
+        if os.path.isdir(os.path.join(dest, rel)):
+            continue
+        found.add(rel)
+
+for rel in sorted(found):
+    print(rel)
+PY
+}
+
+stored_scripts() {
+    [ -d "$SCRIPTS_ROOT" ] || return 0
+    (cd "$SCRIPTS_ROOT" && find . -type f) | sed 's|^\./||'
+}
+
+scripts_list() {
+    {
+        discover_scripts "$DEST/settings.json" "$DEST"
+        discover_scripts "$SRC_ROOT/settings.json" "$DEST"
+        stored_scripts
+    } | sed '/^$/d' | sort -u
+}
+
+file_status() {
+    if [ -f "$1" ] && [ -f "$2" ]; then
+        if cmp -s "$1" "$2"; then
+            echo synced
+        else
+            echo differs
+        fi
+    elif [ -f "$1" ]; then
+        echo repo-only
+    elif [ -f "$2" ]; then
+        echo local-only
+    else
+        echo missing
     fi
 }
 
@@ -94,65 +205,105 @@ sync_one() {
     echo "$name: done"
 }
 
+scripts_each() {
+    action=$1
+    scripts_list | while read -r rel; do
+        repo="$SCRIPTS_ROOT/$rel"
+        local="$DEST/$rel"
+        case "$action" in
+            list) printf '%-12s %-32s %s\n' scripts "$rel" "$(file_status "$repo" "$local")" ;;
+            status)
+                case "$(file_status "$repo" "$local")" in
+                    synced) echo "  $rel: in sync" ;;
+                    differs)
+                        echo "  $rel: push would change $repo"
+                        echo "  $rel: pull would change $local" ;;
+                    repo-only) echo "  $rel: repo-only, run: $(basename "$0") pull scripts" ;;
+                    local-only) echo "  $rel: local-only, run: $(basename "$0") push scripts" ;;
+                    missing) echo "  $rel: referenced by settings.json but missing on both sides" ;;
+                esac ;;
+            diff)
+                echo "  $rel:"
+                if [ -f "$repo" ] && [ -f "$local" ]; then
+                    show_diff "$repo" "$local" | sed 's/^/  /'
+                else
+                    echo "    $(file_status "$repo" "$local")"
+                fi ;;
+            push)
+                if [ -f "$local" ]; then
+                    sync_one "scripts/$rel" "$local" "$repo"
+                else
+                    echo "scripts/$rel: no local file at $local, skipped"
+                fi ;;
+            pull)
+                if [ -f "$repo" ]; then
+                    sync_one "scripts/$rel" "$repo" "$local"
+                    [ ! -x "$repo" ] || [ "$DRY" -ne 0 ] || chmod +x "$local"
+                else
+                    echo "scripts/$rel: not stored in $SCRIPTS_ROOT, skipped"
+                fi ;;
+        esac
+    done
+}
+
 cmd_list() {
     for name in $TARGETS; do
-        file=$(target_file "$name")
-        repo="$SRC_ROOT/$file"
-        local="$DEST/$file"
-        if [ -f "$repo" ] && [ -f "$local" ]; then
-            if cmp -s "$repo" "$local"; then
-                status=synced
+        if [ "$name" = scripts ]; then
+            if [ -z "$(scripts_list)" ]; then
+                printf '%-12s %-32s %s\n' scripts '-' none
             else
-                status=differs
+                scripts_each list
             fi
-        elif [ -f "$repo" ]; then
-            status=repo-only
-        elif [ -f "$local" ]; then
-            status=local-only
-        else
-            status=missing
+            continue
         fi
-        printf '%-12s %-16s %s\n' "$name" "$file" "$status"
+        file=$(target_file "$name")
+        printf '%-12s %-32s %s\n' "$name" "$file" \
+            "$(file_status "$SRC_ROOT/$file" "$DEST/$file")"
     done
 }
 
 cmd_status() {
     for name in "$@"; do
+        known_target "$name"
+        echo "$name:"
+        if [ "$name" = scripts ]; then
+            if [ -z "$(scripts_list)" ]; then
+                echo "  settings.json refers to no files inside $DEST"
+            else
+                scripts_each status
+            fi
+            continue
+        fi
         file=$(target_file "$name")
         repo="$SRC_ROOT/$file"
         local="$DEST/$file"
-        echo "$name:"
-        if [ -f "$repo" ] && [ -f "$local" ]; then
-            if cmp -s "$repo" "$local"; then
-                echo "  in sync"
-            else
+        case "$(file_status "$repo" "$local")" in
+            synced) echo "  in sync" ;;
+            differs)
                 echo "  push (local -> repo) would change $repo"
-                echo "  pull (repo -> local) would change $local"
-            fi
-        elif [ -f "$repo" ]; then
-            echo "  repo-only, run: $(basename "$0") pull $name"
-        elif [ -f "$local" ]; then
-            echo "  local-only, run: $(basename "$0") push $name"
-        else
-            echo "  missing on both sides"
-        fi
+                echo "  pull (repo -> local) would change $local" ;;
+            repo-only) echo "  repo-only, run: $(basename "$0") pull $name" ;;
+            local-only) echo "  local-only, run: $(basename "$0") push $name" ;;
+            missing) echo "  missing on both sides" ;;
+        esac
     done
 }
 
 cmd_diff() {
     for name in "$@"; do
+        known_target "$name"
+        echo "$name:"
+        if [ "$name" = scripts ]; then
+            scripts_each diff
+            continue
+        fi
         file=$(target_file "$name")
         repo="$SRC_ROOT/$file"
         local="$DEST/$file"
-        echo "$name:"
         if [ -f "$repo" ] && [ -f "$local" ]; then
             show_diff "$repo" "$local"
-        elif [ -f "$repo" ]; then
-            echo "  repo-only: $repo"
-        elif [ -f "$local" ]; then
-            echo "  local-only: $local"
         else
-            echo "  missing on both sides"
+            echo "  $(file_status "$repo" "$local")"
         fi
     done
 }
@@ -182,6 +333,7 @@ set -- $NAMES
 
 case "$COMMAND" in
     list) cmd_list ;;
+    scripts) scripts_list ;;
     status)
         [ $# -gt 0 ] || set -- $TARGETS
         cmd_status "$@" ;;
@@ -191,12 +343,22 @@ case "$COMMAND" in
     push)
         [ $# -gt 0 ] || set -- $TARGETS
         for name in "$@"; do
+            known_target "$name"
+            if [ "$name" = scripts ]; then
+                scripts_each push
+                continue
+            fi
             file=$(target_file "$name")
             sync_one "$name" "$DEST/$file" "$SRC_ROOT/$file"
         done ;;
     pull)
         [ $# -gt 0 ] || set -- $TARGETS
         for name in "$@"; do
+            known_target "$name"
+            if [ "$name" = scripts ]; then
+                scripts_each pull
+                continue
+            fi
             file=$(target_file "$name")
             sync_one "$name" "$SRC_ROOT/$file" "$DEST/$file"
         done ;;
