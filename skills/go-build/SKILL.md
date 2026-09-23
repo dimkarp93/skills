@@ -1,6 +1,6 @@
 ---
 name: go-build
-description: Собрать Go-программу по конвенциям репозитория dimkarp93/install (~/tools/install/CONVENTIONS.md) — версия из versions.txt, origin/upstream/commit/channel через ldflags, бинарь с именем репозитория в корне, рецепты build/test/bump-*/release в justfile. Используй, когда просят завести новую тулзу по конвенциям (init_install.sh), собрать Go-тулзу, подготовить её к установке через local_install.sh / github_install.sh / gitea_install.sh, завести Justfile или релизный workflow, добавить --version / --origin / --buildinfo, поднять версию (bump) или обновить Go до последнего стабильного релиза.
+description: Собрать Go-программу по конвенциям репозитория dimkarp93/install (~/tools/install/CONVENTIONS.md) — версия из versions.txt, origin/upstream/commit/channel через ldflags, бинарь с именем репозитория в корне, рецепты build/test/bump-*/release в justfile. Используй, когда просят завести новую тулзу по конвенциям (init_install.sh), собрать Go-тулзу, подготовить её к установке через local_install.sh / github_install.sh / gitea_install.sh, завести Justfile или релизный workflow, добавить --version / --origin / --buildinfo или обновить Go до последнего стабильного релиза. Поднять версию — скилл bump-version.
 ---
 
 # Сборка Go-программы по CONVENTIONS.md
@@ -99,7 +99,8 @@ just build
 
 ## Что не делать
 
-- Не коммить и не пушить без просьбы; `bump-*` — только по явному запросу.
+- Не коммить и не пушить без просьбы; поднять версию — только по явному запросу и через скилл
+  `bump-version` (`bump-*` сам коммитит, ставит тег и пушит во все remote).
 - Не вшивать `git remote get-url origin` в бинарь без нормализации: в remote бывает токен.
 - Не копировать шаблоны `justfile` и workflow руками: единственный их источник —
   `init_install.sh` (`--emit` печатает любой шаблон).
