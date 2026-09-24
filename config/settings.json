@@ -1,4 +1,9 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
   "permissions": {
     "allow": [
       "Bash(git log *)",
@@ -50,10 +55,5 @@
     "enabled": false,
     "mode": "hold"
   },
-  "voiceEnabled": false,
-  "attribution": {
-    "commit": "",
-    "pr": "",
-    "sessionUrl": false
-  }
+  "voiceEnabled": false
 }

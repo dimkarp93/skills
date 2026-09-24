@@ -67,6 +67,20 @@ check_install.sh --fix <path>
 `--fix` дописывает `versions.txt`, `.gitignore`, рецепты `bump-*` и workflow релиза.
 `Makefile` он не трогает — там цели добавляй сам.
 
+### Чем собирать: justfile или Makefile
+
+По умолчанию — `justfile` (его и генерирует `init_install.sh`). `Makefile` — только в двух
+случаях:
+
+- пользователь явно попросил make;
+- в проекте уже есть сборка на `Makefile`, и переделать её на `justfile` не просили.
+
+Во втором случае существующий `Makefile` не заменять на `justfile` из шаблона, даже если так
+проще: недостающие цели (`build` с ldflags версии и origin, экспорт `GOWORK`/`GOFLAGS`,
+`vendor`/`vendor-check`, `bump-*` с `_bump-commit`) дописать в него по образцам для `Makefile`
+из `~/tools/install/CONVENTIONS.md`. Конвенции допускают оба варианта, `check_install.sh`
+проверяет оба.
+
 ## Шаг 3. Написать логику, не сломав контракт
 
 Дальше это обычный репозиторий: пиши код в `cmd/<name>/main.go` (Go) или `<name>.sh`.
