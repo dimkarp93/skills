@@ -1,5 +1,11 @@
 package main
 
+import (
+	"fmt"
+	"io"
+	"os"
+)
+
 const usage = `usage:
   commitkind classify [--staged | REV | A..B]   semantic changes as JSON (no arg: HEAD vs working tree)
   commitkind hint     [--staged | REV | A..B]   suggested commit lines "[tag] text"
@@ -17,8 +23,12 @@ func main() {
 	panic("not implemented")
 }
 func readSource(args []string) ([]byte, error) {
-	panic("not implemented")
+	if len(args) > 0 && args[0] != "-" {
+		return os.ReadFile(args[0])
+	}
+	return io.ReadAll(os.Stdin)
 }
 func fatal(err error) {
-	panic("not implemented")
+	fmt.Fprintln(os.Stderr, "commitkind:", err)
+	os.Exit(1)
 }
