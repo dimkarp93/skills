@@ -42,10 +42,42 @@ func git(args ...string) ([]byte, error) {
 type file struct{ status, oldPath, newPath string }
 
 func changedFiles(args ...string) ([]file, error) {
-	panic("not implemented")
+	out, err := git(append([]string{"diff", "--name-status", "-M", "--no-ext-diff"}, args...)...)
+	if err != nil {
+		return nil, err
+	}
+	var fs []file
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l == "" {
+			continue
+		}
+		p := strings.Split(l, "\t")
+		f := file{status: p[0][:1], oldPath: p[1], newPath: p[len(p)-1]}
+		if strings.HasSuffix(f.newPath, ".go") || strings.HasSuffix(f.oldPath, ".go") {
+			fs = append(fs, f)
+		}
+	}
+	return fs, nil
 }
 func classifyFiles(fs []file, oldRead, newRead func(string) ([]byte, error)) (*Report, error) {
-	panic("not implemented")
+	oldSrc, newSrc := map[string][]byte{}, map[string][]byte{}
+	for _, f := range fs {
+		if f.status != "A" && strings.HasSuffix(f.oldPath, ".go") {
+			b, err := oldRead(f.oldPath)
+			if err != nil {
+				return nil, err
+			}
+			oldSrc[f.oldPath] = b
+		}
+		if f.status != "D" && strings.HasSuffix(f.newPath, ".go") {
+			b, err := newRead(f.newPath)
+			if err != nil {
+				return nil, err
+			}
+			newSrc[f.newPath] = b
+		}
+	}
+	return classify(oldSrc, newSrc)
 }
 func showAt(rev string) func(string) ([]byte, error) {
 	return func(p string) ([]byte, error) {
