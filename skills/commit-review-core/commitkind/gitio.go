@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -85,10 +86,35 @@ func showAt(rev string) func(string) ([]byte, error) {
 	}
 }
 func classifySpec(spec string) (*Report, error) {
-	panic("not implemented")
+	switch {
+	case spec == "":
+		fs, err := changedFiles("HEAD")
+		if err != nil {
+			return nil, err
+		}
+		return classifyFiles(fs, showAt("HEAD"), os.ReadFile)
+	case spec == "--staged":
+		fs, err := changedFiles("--cached")
+		if err != nil {
+			return nil, err
+		}
+		return classifyFiles(fs, showAt("HEAD"), showAt(""))
+	case strings.Contains(spec, ".."):
+		p := strings.SplitN(spec, "..", 2)
+		return classifyRange(p[0], p[1])
+	default:
+		return classifyRange(spec+"^", spec)
+	}
 }
 func classifyRange(a, b string) (*Report, error) {
-	panic("not implemented")
+	if _, err := git("rev-parse", "--verify", "-q", a+"^{commit}"); err != nil {
+		a = emptyTree
+	}
+	fs, err := changedFiles(a, b)
+	if err != nil {
+		return nil, err
+	}
+	return classifyFiles(fs, showAt(a), showAt(b))
 }
 func runCheck(spec string) bool {
 	panic("not implemented")
