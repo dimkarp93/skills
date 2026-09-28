@@ -56,7 +56,18 @@ func recvName(fd *ast.FuncDecl) string {
 	panic("not implemented")
 }
 func paramCount(fl *ast.FieldList) int {
-	panic("not implemented")
+	n := 0
+	if fl == nil {
+		return 0
+	}
+	for _, f := range fl.List {
+		if len(f.Names) == 0 {
+			n++
+		} else {
+			n += len(f.Names)
+		}
+	}
+	return n
 }
 func (s *side) rename(m map[string]string) {
 	panic("not implemented")
@@ -71,13 +82,47 @@ func fieldSet(ts *ast.TypeSpec) map[string]bool {
 	panic("not implemented")
 }
 func union(a, b map[string]bool) map[string]bool {
-	panic("not implemented")
+	out := map[string]bool{}
+	for k := range a {
+		out[k] = true
+	}
+	for k := range b {
+		if out[k] {
+			return nil
+		}
+		out[k] = true
+	}
+	return out
 }
 func sameSet(a, b map[string]bool) bool {
-	panic("not implemented")
+	if a == nil || b == nil || len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
 }
 func shape(s *side, d *decl) string {
-	panic("not implemented")
+	if d.fn != nil {
+		old := d.fn.Name.Name
+		d.fn.Name.Name = "_"
+		defer func() {
+			d.fn.Name.Name = old
+		}()
+		return render(s.fset, d.fn)
+	}
+	if d.ts != nil {
+		old := d.ts.Name.Name
+		d.ts.Name.Name = "_"
+		defer func() {
+			d.ts.Name.Name = old
+		}()
+		return render(s.fset, d.ts)
+	}
+	return d.text
 }
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
