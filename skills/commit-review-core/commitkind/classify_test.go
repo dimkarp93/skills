@@ -92,5 +92,16 @@ func TestVerdict(t *testing.T) {
 	panic("not implemented")
 }
 func TestOrderFuncs(t *testing.T) {
-	panic("not implemented")
+	src := "package a\n\nfunc top() int { return mid() + leaf() }\n\nfunc mid() int {\n\tx := leaf()\n\treturn x + 1\n}\n\nfunc leaf() int { return 1 }\n"
+	got, err := orderLines([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, l := range got {
+		names = append(names, strings.Split(l, "\t")[0])
+	}
+	if strings.Join(names, ",") != "leaf,mid,top" {
+		t.Fatal(names)
+	}
 }
