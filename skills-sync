@@ -7,6 +7,7 @@ SRC_ROOT="$REPO/skills"
 DEST=${CLAUDE_SKILLS_DIR:-$HOME/.claude/skills}
 DRY=0
 YES=0
+DEPS=1
 
 usage() {
     cat <<EOF
@@ -20,13 +21,18 @@ Commands:
   diff NAME        full diff between the repository copy and the local one
   push [NAME..]    local -> repository (no NAME: every local skill)
   pull [NAME..]    repository -> local (no NAME: every stored skill)
+  add NAME..       same as pull, for adding or overwriting single skills
   index            print a markdown table built from the SKILL.md frontmatter
 
 Flags:
   -n, --dry-run    show what would change and stop
   -y, --yes        do not ask before overwriting or deleting files
       --dest DIR   use DIR instead of $DEST
+      --no-deps    do not sync the skills listed in 'requires:' of the named skills
   -h, --help       show this help
+
+A skill may list other skills it needs in its frontmatter ('requires: a b');
+push, pull and add with explicit names sync those too.
 
 A skill missing from the source is never removed from the target; deletions
 happen only inside a skill directory that is being synced.
@@ -64,6 +70,25 @@ validate() {
     [ "$got" = "$name" ] || die "$name: frontmatter name is '$got', expected '$name'"
     desc=$(frontmatter "$dir/SKILL.md" description)
     [ -n "$desc" ] || die "$name: SKILL.md has no 'description' in the frontmatter"
+}
+
+with_deps() {
+    root=$1
+    shift
+    seen=""
+    queue="$*"
+    while [ -n "$queue" ]; do
+        set -- $queue
+        cur=$1
+        shift
+        queue="$*"
+        case " $seen " in *" $cur "*) continue ;; esac
+        seen="$seen $cur"
+        printf '%s\n' "$cur"
+        [ "$DEPS" -eq 1 ] && [ -f "$root/$cur/SKILL.md" ] || continue
+        req=$(frontmatter "$root/$cur/SKILL.md" requires)
+        [ -z "$req" ] || queue="$queue $req"
+    done
 }
 
 list_skills() {
@@ -171,6 +196,7 @@ while [ $# -gt 0 ]; do
         -h|--help) usage; exit 0 ;;
         -n|--dry-run) DRY=1; shift ;;
         -y|--yes) YES=1; shift ;;
+        --no-deps) DEPS=0; shift ;;
         --dest) [ $# -ge 2 ] || die "--dest needs a directory"; DEST=$2; shift 2 ;;
         -*) echo "Unknown flag: $1" >&2; usage >&2; exit 1 ;;
         *)
@@ -199,13 +225,14 @@ case "$COMMAND" in
         [ $# -eq 1 ] || die "diff takes exactly one skill name"
         diff -ruN "$SRC_ROOT/$1" "$DEST/$1" || true ;;
     push)
-        [ $# -gt 0 ] || set -- $(list_skills "$DEST")
+        if [ $# -gt 0 ]; then set -- $(with_deps "$DEST" "$@"); else set -- $(list_skills "$DEST"); fi
         [ $# -gt 0 ] || die "nothing to push: $DEST is empty"
         for name in "$@"; do
             sync_one "$DEST/$name" "$SRC_ROOT/$name" "$name"
         done ;;
-    pull)
-        [ $# -gt 0 ] || set -- $(list_skills "$SRC_ROOT")
+    pull|add)
+        if [ "$COMMAND" = add ] && [ $# -eq 0 ]; then die "add needs at least one skill name"; fi
+        if [ $# -gt 0 ]; then set -- $(with_deps "$SRC_ROOT" "$@"); else set -- $(list_skills "$SRC_ROOT"); fi
         [ $# -gt 0 ] || die "nothing to pull: $SRC_ROOT is empty"
         for name in "$@"; do
             sync_one "$SRC_ROOT/$name" "$DEST/$name" "$name"
