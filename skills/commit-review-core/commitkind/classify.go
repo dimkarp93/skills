@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"go/ast"
 	"go/token"
+	"reflect"
+	"sort"
+	"strings"
 )
 
 type Change struct {
@@ -33,7 +37,11 @@ func parseSide(src map[string][]byte) (*side, error) {
 	panic("not implemented")
 }
 func render(_ *token.FileSet, n any) string {
-	panic("not implemented")
+	var b bytes.Buffer
+	ast.Fprint(&b, nil, n, func(name string, v reflect.Value) bool {
+		return ast.NotNilFilter(name, v) && v.Type() != reflect.TypeOf(token.NoPos)
+	})
+	return b.String()
 }
 func recvName(fd *ast.FuncDecl) string {
 	panic("not implemented")
@@ -63,10 +71,16 @@ func shape(s *side, d *decl) string {
 	panic("not implemented")
 }
 func sortedKeys[V any](m map[string]V) []string {
-	panic("not implemented")
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 func short(key string) string {
-	panic("not implemented")
+	i := strings.Index(key, " ")
+	return key[i+1:]
 }
 func classify(oldSrc, newSrc map[string][]byte) (*Report, error) {
 	panic("not implemented")
@@ -78,10 +92,16 @@ func removeKind(d *decl) string {
 	panic("not implemented")
 }
 func lastPart(s string) string {
-	panic("not implemented")
+	if i := strings.LastIndex(s, "."); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }
 func bodyText(s *side, d *decl) string {
-	panic("not implemented")
+	if d.fn == nil || d.fn.Body == nil {
+		return ""
+	}
+	return render(s.fset, d.fn.Body)
 }
 func sameBytes(a, b map[string][]byte) bool {
 	panic("not implemented")
