@@ -99,10 +99,57 @@ func (s *side) rename(m map[string]string) {
 	}
 }
 func (s *side) clearArgs(names map[string]bool) {
-	panic("not implemented")
+	if len(names) == 0 {
+		return
+	}
+	for _, f := range s.files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			c, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fn := c.Fun.(type) {
+			case *ast.Ident:
+				if names[fn.Name] {
+					c.Args = nil
+				}
+			case *ast.SelectorExpr:
+				if names[fn.Sel.Name] {
+					c.Args = nil
+				}
+			}
+			return true
+		})
+	}
 }
 func (s *side) decls() map[string]*decl {
-	panic("not implemented")
+	out := map[string]*decl{}
+	for file, f := range s.files {
+		for _, d := range f.Decls {
+			switch x := d.(type) {
+			case *ast.FuncDecl:
+				key := "func " + x.Name.Name
+				if r := recvName(x); r != "" {
+					key = "func " + r + "." + x.Name.Name
+				}
+				out[key] = &decl{key: key, file: file, fn: x, text: render(s.fset, x), sig: render(s.fset, x.Type), np: paramCount(x.Type.Params)}
+			case *ast.GenDecl:
+				for _, sp := range x.Specs {
+					switch y := sp.(type) {
+					case *ast.TypeSpec:
+						key := "type " + y.Name.Name
+						out[key] = &decl{key: key, file: file, ts: y, text: render(s.fset, y)}
+					case *ast.ValueSpec:
+						for _, nm := range y.Names {
+							key := x.Tok.String() + " " + nm.Name
+							out[key] = &decl{key: key, file: file, text: render(s.fset, y)}
+						}
+					}
+				}
+			}
+		}
+	}
+	return out
 }
 func fieldSet(ts *ast.TypeSpec) map[string]bool {
 	st, ok := ts.Type.(*ast.StructType)
