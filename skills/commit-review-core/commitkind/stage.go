@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"path"
@@ -16,6 +18,7 @@ func funcKey(fd *ast.FuncDecl) string {
 	}
 	return fd.Name.Name
 }
+
 func isStubBody(b *ast.BlockStmt) bool {
 	if b == nil || len(b.List) == 0 {
 		return true
@@ -34,9 +37,14 @@ func isStubBody(b *ast.BlockStmt) bool {
 	id, ok := call.Fun.(*ast.Ident)
 	return ok && id.Name == "panic"
 }
+
 func stubBody() *ast.BlockStmt {
-	return &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent("panic"), Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("not implemented")}}}}}}
+	return &ast.BlockStmt{List: []ast.Stmt{&ast.ExprStmt{X: &ast.CallExpr{
+		Fun:  ast.NewIdent("panic"),
+		Args: []ast.Expr{&ast.BasicLit{Kind: token.STRING, Value: strconv.Quote("not implemented")}},
+	}}}}
 }
+
 func importName(spec *ast.ImportSpec) string {
 	if spec.Name != nil {
 		return spec.Name.Name
@@ -48,6 +56,7 @@ func importName(spec *ast.ImportSpec) string {
 	}
 	return base
 }
+
 func dropUnusedImports(f *ast.File) {
 	used := map[string]bool{}
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -90,9 +99,33 @@ func dropUnusedImports(f *ast.File) {
 	}
 	f.Imports = imports
 }
+
 func stage(src []byte, keep map[string]bool, all bool) ([]byte, error) {
-	panic("not implemented")
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "stage.go", src, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	if all {
+		return src, nil
+	}
+	for _, d := range f.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || fd.Body == nil {
+			continue
+		}
+		if !keep[funcKey(fd)] {
+			fd.Body = stubBody()
+		}
+	}
+	dropUnusedImports(f)
+	var b bytes.Buffer
+	if err := format.Node(&b, token.NewFileSet(), f); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
+
 func listFuncs(src []byte) ([]string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "funcs.go", src, 0)
