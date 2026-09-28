@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -26,13 +27,30 @@ func TestStageSkeleton(t *testing.T) {
 	panic("not implemented")
 }
 func TestStageKeep(t *testing.T) {
-	panic("not implemented")
+	out, err := stage([]byte(stageSrc), map[string]bool{"Load": true}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "TrimSpace") || !strings.Contains(s, `"strings"`) || strings.Contains(s, `"fmt"`) {
+		t.Fatal(s)
+	}
+	out, _ = stage([]byte(stageSrc), map[string]bool{"T.Show": true}, false)
+	if !strings.Contains(string(out), `"fmt"`) || strings.Contains(string(out), `"strings"`) {
+		t.Fatal(string(out))
+	}
 }
 func TestStageAll(t *testing.T) {
-	panic("not implemented")
+	out, _ := stage([]byte(stageSrc), nil, true)
+	if string(out) != stageSrc {
+		t.Fatal("all must return the source")
+	}
 }
 func TestListFuncs(t *testing.T) {
-	panic("not implemented")
+	got, err := listFuncs([]byte(stageSrc))
+	if err != nil || len(got) != 3 || !strings.HasPrefix(got[1], "T.Show\t") {
+		t.Fatal(got, err)
+	}
 }
 func TestSkeletonThenFillClassification(t *testing.T) {
 	panic("not implemented")
