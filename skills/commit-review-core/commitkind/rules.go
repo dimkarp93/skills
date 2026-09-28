@@ -1,7 +1,15 @@
 package main
 
+import (
+	"strings"
+)
+
 func set(k ...string) map[string]bool {
-	panic("not implemented")
+	m := map[string]bool{}
+	for _, x := range k {
+		m[x] = true
+	}
+	return m
 }
 
 var (
@@ -10,11 +18,23 @@ var (
 )
 
 func commitClass(tag string, kinds map[string]bool) string {
-	panic("not implemented")
+	switch tag {
+	case "rename", "move", "split", "unite", "fmt", "add", "remove", "change":
+		return "technical"
+	case "logic", "fix":
+		return "business"
+	}
+	return "other"
 }
 func verdict(tag string, kinds map[string]bool, changes []Change) []string {
 	panic("not implemented")
 }
 func isTagKind(tag, kind string) bool {
-	panic("not implemented")
+	switch tag {
+	case "rename":
+		return strings.HasPrefix(kind, "rename-")
+	case "move":
+		return kind == "move"
+	}
+	return false
 }
