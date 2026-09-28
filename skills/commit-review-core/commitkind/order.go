@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"sort"
+	"strings"
 )
 
 type fnInfo struct {
@@ -30,7 +32,8 @@ func orderFuncs(src []byte) ([]fnInfo, error) {
 		key := funcKey(fd)
 		decls[key] = fd
 		byName[fd.Name.Name] = append(byName[fd.Name.Name], key)
-		infos = append(infos, &fnInfo{key: key, deps: map[string]bool{}, lines: fset.Position(fd.End()).Line - fset.Position(fd.Pos()).Line + 1})
+		infos = append(infos, &fnInfo{key: key, deps: map[string]bool{},
+			lines: fset.Position(fd.End()).Line - fset.Position(fd.Pos()).Line + 1})
 	}
 	for _, in := range infos {
 		ast.Inspect(decls[in.key].Body, func(n ast.Node) bool {
@@ -90,6 +93,15 @@ func orderFuncs(src []byte) ([]fnInfo, error) {
 	}
 	return out, nil
 }
+
 func orderLines(src []byte) ([]string, error) {
-	panic("not implemented")
+	infos, err := orderFuncs(src)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, in := range infos {
+		out = append(out, fmt.Sprintf("%s\t%d\t%s", in.key, in.lines, strings.Join(sortedKeys(in.deps), ",")))
+	}
+	return out, nil
 }
