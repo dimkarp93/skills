@@ -89,7 +89,26 @@ func TestParseSubject(t *testing.T) {
 	panic("not implemented")
 }
 func TestVerdict(t *testing.T) {
-	panic("not implemented")
+	ch := func(kind string) []Change {
+		return []Change{{Kind: kind, Name: "F"}}
+	}
+	cases := []struct {
+		tag  string
+		kind []string
+		bad  bool
+	}{{"rename", []string{"rename-func"}, false}, {"rename", []string{"rename-func", "body-change"}, true}, {"rename", []string{"rename-func", "add-param"}, true}, {"add", []string{"add-param"}, false}, {"add", []string{"add-param", "body-change"}, true}, {"add", []string{"add-type", "add-stub"}, false}, {"add", []string{"add-stub", "add-decl"}, true}, {"add", []string{"body-change"}, true}, {"remove", []string{"remove-param"}, false}, {"remove", []string{"remove-type"}, false}, {"remove", []string{"remove-decl"}, true}, {"change", []string{"change-sig"}, false}, {"change", []string{"change-sig", "body-change"}, true}, {"change", []string{"body-change"}, true}, {"logic", []string{"body-change"}, false}, {"logic", []string{"add-decl", "body-change"}, false}, {"logic", []string{"add-decl", "remove-decl"}, true}, {"logic", []string{"body-change", "rename-func"}, true}, {"logic", []string{"body-change", "add-param"}, true}, {"logic", []string{"add-stub"}, true}, {"fix", []string{"body-change"}, false}, {"fix", []string{"body-change", "add-decl"}, true}, {"fix", []string{"body-change", "move"}, true}, {"split", []string{"split-type", "body-change"}, false}, {"fmt", []string{"format-only"}, false}, {"fmt", []string{"body-change"}, true}, {"docs", []string{"body-change"}, true}, {"test", []string{"body-change"}, false}}
+	for _, c := range cases {
+		kinds := map[string]bool{}
+		var changes []Change
+		for _, k := range c.kind {
+			kinds[k] = true
+			changes = append(changes, ch(k)...)
+		}
+		got := len(verdict(c.tag, kinds, changes)) > 0
+		if got != c.bad {
+			t.Errorf("%s %v: bad=%v want %v", c.tag, c.kind, got, c.bad)
+		}
+	}
 }
 func TestOrderFuncs(t *testing.T) {
 	src := "package a\n\nfunc top() int { return mid() + leaf() }\n\nfunc mid() int {\n\tx := leaf()\n\treturn x + 1\n}\n\nfunc leaf() int { return 1 }\n"
