@@ -17,10 +17,12 @@ type Change struct {
 	To   string `json:"to,omitempty"`
 	File string `json:"file,omitempty"`
 }
+
 type Report struct {
 	Files   []string `json:"files"`
 	Changes []Change `json:"changes"`
 }
+
 type decl struct {
 	key  string
 	file string
@@ -30,6 +32,7 @@ type decl struct {
 	fn   *ast.FuncDecl
 	ts   *ast.TypeSpec
 }
+
 type side struct {
 	fset  *token.FileSet
 	files map[string]*ast.File
@@ -46,6 +49,7 @@ func parseSide(src map[string][]byte) (*side, error) {
 	}
 	return s, nil
 }
+
 func render(_ *token.FileSet, n any) string {
 	var b bytes.Buffer
 	ast.Fprint(&b, nil, n, func(name string, v reflect.Value) bool {
@@ -53,6 +57,7 @@ func render(_ *token.FileSet, n any) string {
 	})
 	return b.String()
 }
+
 func recvName(fd *ast.FuncDecl) string {
 	if fd.Recv == nil || len(fd.Recv.List) == 0 {
 		return ""
@@ -69,6 +74,7 @@ func recvName(fd *ast.FuncDecl) string {
 	}
 	return ""
 }
+
 func paramCount(fl *ast.FieldList) int {
 	n := 0
 	if fl == nil {
@@ -83,6 +89,7 @@ func paramCount(fl *ast.FieldList) int {
 	}
 	return n
 }
+
 func (s *side) rename(m map[string]string) {
 	if len(m) == 0 {
 		return
@@ -98,6 +105,7 @@ func (s *side) rename(m map[string]string) {
 		})
 	}
 }
+
 func (s *side) clearArgs(names map[string]bool) {
 	if len(names) == 0 {
 		return
@@ -122,6 +130,7 @@ func (s *side) clearArgs(names map[string]bool) {
 		})
 	}
 }
+
 func (s *side) decls() map[string]*decl {
 	out := map[string]*decl{}
 	for file, f := range s.files {
@@ -132,7 +141,8 @@ func (s *side) decls() map[string]*decl {
 				if r := recvName(x); r != "" {
 					key = "func " + r + "." + x.Name.Name
 				}
-				out[key] = &decl{key: key, file: file, fn: x, text: render(s.fset, x), sig: render(s.fset, x.Type), np: paramCount(x.Type.Params)}
+				out[key] = &decl{key: key, file: file, fn: x, text: render(s.fset, x),
+					sig: render(s.fset, x.Type), np: paramCount(x.Type.Params)}
 			case *ast.GenDecl:
 				for _, sp := range x.Specs {
 					switch y := sp.(type) {
@@ -151,6 +161,7 @@ func (s *side) decls() map[string]*decl {
 	}
 	return out
 }
+
 func fieldSet(ts *ast.TypeSpec) map[string]bool {
 	st, ok := ts.Type.(*ast.StructType)
 	if !ok {
@@ -167,6 +178,7 @@ func fieldSet(ts *ast.TypeSpec) map[string]bool {
 	}
 	return out
 }
+
 func union(a, b map[string]bool) map[string]bool {
 	out := map[string]bool{}
 	for k := range a {
@@ -180,6 +192,7 @@ func union(a, b map[string]bool) map[string]bool {
 	}
 	return out
 }
+
 func sameSet(a, b map[string]bool) bool {
 	if a == nil || b == nil || len(a) != len(b) {
 		return false
@@ -191,25 +204,23 @@ func sameSet(a, b map[string]bool) bool {
 	}
 	return true
 }
+
 func shape(s *side, d *decl) string {
 	if d.fn != nil {
 		old := d.fn.Name.Name
 		d.fn.Name.Name = "_"
-		defer func() {
-			d.fn.Name.Name = old
-		}()
+		defer func() { d.fn.Name.Name = old }()
 		return render(s.fset, d.fn)
 	}
 	if d.ts != nil {
 		old := d.ts.Name.Name
 		d.ts.Name.Name = "_"
-		defer func() {
-			d.ts.Name.Name = old
-		}()
+		defer func() { d.ts.Name.Name = old }()
 		return render(s.fset, d.ts)
 	}
 	return d.text
 }
+
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -218,13 +229,180 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(out)
 	return out
 }
+
 func short(key string) string {
 	i := strings.Index(key, " ")
 	return key[i+1:]
 }
+
 func classify(oldSrc, newSrc map[string][]byte) (*Report, error) {
-	panic("not implemented")
+	rep := &Report{}
+	o, err := parseSide(oldSrc)
+	if err != nil {
+		return nil, err
+	}
+	n, err := parseSide(newSrc)
+	if err != nil {
+		return nil, err
+	}
+	for f := range oldSrc {
+		rep.Files = append(rep.Files, f)
+	}
+	for f := range newSrc {
+		if _, ok := oldSrc[f]; !ok {
+			rep.Files = append(rep.Files, f)
+		}
+	}
+	sort.Strings(rep.Files)
+
+	od, nd := o.decls(), n.decls()
+	removed, added := map[string]*decl{}, map[string]*decl{}
+	for k, d := range od {
+		if _, ok := nd[k]; !ok {
+			removed[k] = d
+		}
+	}
+	for k, d := range nd {
+		if _, ok := od[k]; !ok {
+			added[k] = d
+		}
+	}
+
+	ren := map[string]string{}
+	for _, rk := range sortedKeys(removed) {
+		r := removed[rk]
+		if strings.HasPrefix(r.key, "var ") || strings.HasPrefix(r.key, "const ") {
+			continue
+		}
+		for _, ak := range sortedKeys(added) {
+			a := added[ak]
+			if strings.Split(r.key, " ")[0] != strings.Split(a.key, " ")[0] {
+				continue
+			}
+			if shape(o, r) != shape(n, a) {
+				continue
+			}
+			kind := "rename-func"
+			if r.ts != nil {
+				kind = "rename-type"
+			}
+			rn, an := r.key[strings.Index(r.key, " ")+1:], a.key[strings.Index(a.key, " ")+1:]
+			ren[lastPart(rn)] = lastPart(an)
+			rep.Changes = append(rep.Changes, Change{Kind: kind, Name: rn, To: an, File: a.file})
+			delete(removed, rk)
+			delete(added, ak)
+			break
+		}
+	}
+
+	for _, rk := range sortedKeys(removed) {
+		r := removed[rk]
+		if r.ts == nil {
+			continue
+		}
+		rf := fieldSet(r.ts)
+		found := false
+		for _, a1 := range sortedKeys(added) {
+			for _, a2 := range sortedKeys(added) {
+				if a1 >= a2 || added[a1].ts == nil || added[a2].ts == nil {
+					continue
+				}
+				if sameSet(rf, union(fieldSet(added[a1].ts), fieldSet(added[a2].ts))) {
+					rep.Changes = append(rep.Changes, Change{Kind: "split-type", Name: short(rk),
+						To: short(a1) + "," + short(a2), File: added[a1].file})
+					delete(removed, rk)
+					delete(added, a1)
+					delete(added, a2)
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	}
+	for _, ak := range sortedKeys(added) {
+		a := added[ak]
+		if a.ts == nil {
+			continue
+		}
+		af := fieldSet(a.ts)
+		found := false
+		for _, r1 := range sortedKeys(removed) {
+			for _, r2 := range sortedKeys(removed) {
+				if r1 >= r2 || removed[r1].ts == nil || removed[r2].ts == nil {
+					continue
+				}
+				if sameSet(af, union(fieldSet(removed[r1].ts), fieldSet(removed[r2].ts))) {
+					rep.Changes = append(rep.Changes, Change{Kind: "unite-type", Name: short(r1) + "," + short(r2),
+						To: short(ak), File: a.file})
+					delete(added, ak)
+					delete(removed, r1)
+					delete(removed, r2)
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+	}
+
+	o.rename(ren)
+	od = o.decls()
+	paramChanged := map[string]bool{}
+	for k, d := range od {
+		if nw, ok := nd[k]; ok && d.fn != nil && nw.fn != nil && d.np != nw.np {
+			paramChanged[d.fn.Name.Name] = true
+		}
+	}
+	o.clearArgs(paramChanged)
+	n.clearArgs(paramChanged)
+	od, nd = o.decls(), n.decls()
+
+	for _, k := range sortedKeys(nd) {
+		nw := nd[k]
+		d, ok := od[k]
+		if !ok {
+			continue
+		}
+		if d.text == nw.text {
+			if d.file != nw.file {
+				rep.Changes = append(rep.Changes, Change{Kind: "move", Name: short(k), File: nw.file})
+			}
+			continue
+		}
+		if nw.fn != nil && d.np != nw.np {
+			kind := "add-param"
+			if nw.np < d.np {
+				kind = "remove-param"
+			}
+			rep.Changes = append(rep.Changes, Change{Kind: kind, Name: short(k), File: nw.file})
+			if bodyText(o, d) != bodyText(n, nw) {
+				rep.Changes = append(rep.Changes, Change{Kind: "body-change", Name: short(k), File: nw.file})
+			}
+			continue
+		}
+		if nw.fn != nil && d.sig != nw.sig {
+			rep.Changes = append(rep.Changes, Change{Kind: "change-sig", Name: short(k), File: nw.file})
+			continue
+		}
+		rep.Changes = append(rep.Changes, Change{Kind: "body-change", Name: short(k), File: nw.file})
+	}
+	for _, k := range sortedKeys(added) {
+		rep.Changes = append(rep.Changes, Change{Kind: addKind(added[k]), Name: short(k), File: added[k].file})
+	}
+	for _, k := range sortedKeys(removed) {
+		rep.Changes = append(rep.Changes, Change{Kind: removeKind(removed[k]), Name: short(k), File: removed[k].file})
+	}
+	if len(rep.Changes) == 0 && !sameBytes(oldSrc, newSrc) {
+		rep.Changes = append(rep.Changes, Change{Kind: "format-only", Name: "-"})
+	}
+	return rep, nil
 }
+
 func addKind(d *decl) string {
 	switch {
 	case d.ts != nil:
@@ -236,6 +414,7 @@ func addKind(d *decl) string {
 	}
 	return "add-value"
 }
+
 func removeKind(d *decl) string {
 	switch {
 	case d.ts != nil:
@@ -245,18 +424,21 @@ func removeKind(d *decl) string {
 	}
 	return "remove-value"
 }
+
 func lastPart(s string) string {
 	if i := strings.LastIndex(s, "."); i >= 0 {
 		return s[i+1:]
 	}
 	return s
 }
+
 func bodyText(s *side, d *decl) string {
 	if d.fn == nil || d.fn.Body == nil {
 		return ""
 	}
 	return render(s.fset, d.fn.Body)
 }
+
 func sameBytes(a, b map[string][]byte) bool {
 	if len(a) != len(b) {
 		return false
@@ -269,7 +451,12 @@ func sameBytes(a, b map[string][]byte) bool {
 	return true
 }
 
-var hintTag = map[string]string{"rename-func": "rename", "rename-type": "rename", "move": "move", "format-only": "fmt", "split-type": "split", "unite-type": "unite", "add-param": "add", "remove-param": "remove", "change-sig": "change", "body-change": "logic", "add-decl": "logic", "remove-decl": "logic", "add-type": "add", "add-stub": "add", "add-value": "add", "remove-type": "remove", "remove-value": "remove"}
+var hintTag = map[string]string{
+	"rename-func": "rename", "rename-type": "rename", "move": "move", "format-only": "fmt",
+	"split-type": "split", "unite-type": "unite", "add-param": "add", "remove-param": "remove",
+	"change-sig": "change", "body-change": "logic", "add-decl": "logic", "remove-decl": "logic",
+	"add-type": "add", "add-stub": "add", "add-value": "add", "remove-type": "remove", "remove-value": "remove",
+}
 
 func hintLines(r *Report) []string {
 	var out []string
