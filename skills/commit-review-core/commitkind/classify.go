@@ -272,5 +272,33 @@ func sameBytes(a, b map[string][]byte) bool {
 var hintTag = map[string]string{"rename-func": "rename", "rename-type": "rename", "move": "move", "format-only": "fmt", "split-type": "split", "unite-type": "unite", "add-param": "add", "remove-param": "remove", "change-sig": "change", "body-change": "logic", "add-decl": "logic", "remove-decl": "logic", "add-type": "add", "add-stub": "add", "add-value": "add", "remove-type": "remove", "remove-value": "remove"}
 
 func hintLines(r *Report) []string {
-	panic("not implemented")
+	var out []string
+	for _, c := range r.Changes {
+		t := hintTag[c.Kind]
+		var text string
+		switch c.Kind {
+		case "rename-func", "rename-type":
+			text = fmt.Sprintf("rename %s to %s", c.Name, c.To)
+		case "split-type":
+			text = fmt.Sprintf("split %s into %s", c.Name, c.To)
+		case "unite-type":
+			text = fmt.Sprintf("unite %s into %s", c.Name, c.To)
+		case "add-param":
+			text = "add argument to " + c.Name
+		case "remove-param":
+			text = "remove argument from " + c.Name
+		case "move":
+			text = "move " + c.Name
+		case "format-only":
+			text = "format code"
+		case "add-decl", "add-type", "add-stub", "add-value":
+			text = "add " + c.Name
+		case "remove-decl", "remove-type", "remove-value":
+			text = "remove " + c.Name
+		default:
+			text = "change " + c.Name
+		}
+		out = append(out, fmt.Sprintf("[%s] %s\t(%s)", t, text, c.File))
+	}
+	return out
 }
