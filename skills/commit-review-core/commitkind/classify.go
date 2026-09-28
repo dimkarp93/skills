@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"reflect"
 	"sort"
@@ -34,7 +35,15 @@ type side struct {
 }
 
 func parseSide(src map[string][]byte) (*side, error) {
-	panic("not implemented")
+	s := &side{fset: token.NewFileSet(), files: map[string]*ast.File{}}
+	for name, b := range src {
+		f, err := parser.ParseFile(s.fset, name, b, parser.SkipObjectResolution)
+		if err != nil {
+			return nil, err
+		}
+		s.files[name] = f
+	}
+	return s, nil
 }
 func render(_ *token.FileSet, n any) string {
 	var b bytes.Buffer
@@ -86,10 +95,24 @@ func classify(oldSrc, newSrc map[string][]byte) (*Report, error) {
 	panic("not implemented")
 }
 func addKind(d *decl) string {
-	panic("not implemented")
+	switch {
+	case d.ts != nil:
+		return "add-type"
+	case d.fn != nil && isStubBody(d.fn.Body):
+		return "add-stub"
+	case d.fn != nil:
+		return "add-decl"
+	}
+	return "add-value"
 }
 func removeKind(d *decl) string {
-	panic("not implemented")
+	switch {
+	case d.ts != nil:
+		return "remove-type"
+	case d.fn != nil:
+		return "remove-decl"
+	}
+	return "remove-value"
 }
 func lastPart(s string) string {
 	if i := strings.LastIndex(s, "."); i >= 0 {
@@ -104,7 +127,15 @@ func bodyText(s *side, d *decl) string {
 	return render(s.fset, d.fn.Body)
 }
 func sameBytes(a, b map[string][]byte) bool {
-	panic("not implemented")
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if w, ok := b[k]; !ok || !bytes.Equal(v, w) {
+			return false
+		}
+	}
+	return true
 }
 
 var hintTag = map[string]string{"rename-func": "rename", "rename-type": "rename", "move": "move", "format-only": "fmt", "split-type": "split", "unite-type": "unite", "add-param": "add", "remove-param": "remove", "change-sig": "change", "body-change": "logic", "add-decl": "logic", "remove-decl": "logic", "add-type": "add", "add-stub": "add", "add-value": "add", "remove-type": "remove", "remove-value": "remove"}
