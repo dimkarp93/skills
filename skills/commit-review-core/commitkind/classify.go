@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -53,7 +54,20 @@ func render(_ *token.FileSet, n any) string {
 	return b.String()
 }
 func recvName(fd *ast.FuncDecl) string {
-	panic("not implemented")
+	if fd.Recv == nil || len(fd.Recv.List) == 0 {
+		return ""
+	}
+	t := fd.Recv.List[0].Type
+	if st, ok := t.(*ast.StarExpr); ok {
+		t = st.X
+	}
+	if ix, ok := t.(*ast.IndexExpr); ok {
+		t = ix.X
+	}
+	if id, ok := t.(*ast.Ident); ok {
+		return id.Name
+	}
+	return ""
 }
 func paramCount(fl *ast.FieldList) int {
 	n := 0
@@ -70,7 +84,19 @@ func paramCount(fl *ast.FieldList) int {
 	return n
 }
 func (s *side) rename(m map[string]string) {
-	panic("not implemented")
+	if len(m) == 0 {
+		return
+	}
+	for _, f := range s.files {
+		ast.Inspect(f, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok {
+				if to, ok := m[id.Name]; ok {
+					id.Name = to
+				}
+			}
+			return true
+		})
+	}
 }
 func (s *side) clearArgs(names map[string]bool) {
 	panic("not implemented")
@@ -79,7 +105,20 @@ func (s *side) decls() map[string]*decl {
 	panic("not implemented")
 }
 func fieldSet(ts *ast.TypeSpec) map[string]bool {
-	panic("not implemented")
+	st, ok := ts.Type.(*ast.StructType)
+	if !ok {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 {
+			out[fmt.Sprintf("%T", f.Type)] = true
+		}
+		for _, n := range f.Names {
+			out[n.Name] = true
+		}
+	}
+	return out
 }
 func union(a, b map[string]bool) map[string]bool {
 	out := map[string]bool{}
